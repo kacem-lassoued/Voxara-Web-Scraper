@@ -1,0 +1,48 @@
+# Python bytecode files
+*.pyc
+*~
+__pycache__/
+
+# Environment folders
+.env
+myvenv/
+venv/
+virtual/
+
+# Database file
+db.sqlite3
+
+# Static files folder at project root (if you have one)
+static/
+
+# macOS system files
+._*
+.DS_Store
+.fseventsd
+.Spotlight-V100
+
+# Windows system files
+Thumbs.db*
+ehthumbs*.db
+[Dd]esktop.ini
+$RECYCLE.BIN/
+
+# IDEs and editors
+.vscode/
+.history/
+*.code-workspace
+.idea/
+
+# Django stuff you typically don't want in Git
+media/       # if you have a media upload folder
+*.log        # log files
+
+# Coverage reports
+htmlcov/
+.coverage
+
+# Pytest cache
+.pytest_cache/
+
+# Pipenv files (optional)
+Pipfile.lock
