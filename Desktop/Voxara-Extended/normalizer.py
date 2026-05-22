@@ -37,7 +37,8 @@ load_dotenv()
 AI_BACKEND = os.getenv("AI_BACKEND", "gemini")
 
 
-GEMINI_API_KEY    = os.getenv("GEMINI_API_KEY", os.getenv("GEMINI_API_KEY", ""))
+GEMINI_API_KEY    = os.getenv("GEMINI_API_KEY", "")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
 # How many products to send per AI batch (keeps prompts short, avoids timeouts)
 BATCH_SIZE = 20
@@ -80,6 +81,10 @@ BRANDS = [
     "Samsung", "Huawei", "Honor", "Xiaomi",
     "Toshiba", "Fujitsu", "Panasonic",
     "Gigabyte", "GIGABYTE",
+    # Budget / Tunisia-market brands
+    "BMAX", "Chuwi", "Jumper", "Mechrevo", "Teclast",
+    "Infinix", "Tecno", "Hisense", "TCL",
+    "Thomson", "Haier", "Avita", "Dynabook",
 ]
 
 # Map brand aliases to canonical names
@@ -123,11 +128,13 @@ _SCREEN_RE = re.compile(
 
 _CPU_RE = re.compile(
     r"(Intel\s+Core\s+[iI]\d[\w\-]+)"     # Intel Core i5-1235U
+    r"|(Intel\s+Core\s+Ultra\s+\d[\w\-]+)" # Intel Core Ultra 5/7/9
+    r"|(Intel\s+[NN]\d{2,3}[\w\-]*)"       # Intel N95, N100, N200, N4500
     r"|(Intel\s+Celeron[\w\s\-]*)"
     r"|(Intel\s+Pentium[\w\s\-]*)"
-    r"|(AMD\s+Ryzen\s+\d[\w\s\-]+)"       # AMD Ryzen 5 5500U
+    r"|(AMD\s+Ryzen\s+\d[\w\s\-]+)"        # AMD Ryzen 5 5500U
     r"|(AMD\s+Athlon[\w\s\-]*)"
-    r"|(Apple\s+M\d[\w\s]*)",             # Apple M1 / M2 Pro
+    r"|(Apple\s+M\d[\w\s]*)",              # Apple M1 / M2 Pro
     re.IGNORECASE,
 )
 
@@ -188,10 +195,15 @@ def rule_parse(text: str) -> dict[str, Any]:
     cpu_m = _CPU_RE.search(combined)
     if cpu_m:
         specs["cpu"] = _first_group(cpu_m)
-        # Derive generation hint
-        gen_m = re.search(r"(\d{2})th Gen", combined, re.IGNORECASE)
+        # Derive generation hint — English "12th Gen" and French "12è/12ème Génération"
+        gen_m = re.search(
+            r"(\d{1,2})(?:th|st|nd|rd|è|ème|e)?\s*[Gg]én(?:ération)?|"
+            r"(\d{1,2})(?:th|st|nd|rd)\s+Gen",
+            combined, re.IGNORECASE
+        )
         if gen_m:
-            specs["cpu_gen"] = f"{gen_m.group(1)}th Gen"
+            n = gen_m.group(1) or gen_m.group(2)
+            specs["cpu_gen"] = f"{n}th Gen"
 
     # ── RAM ───────────────────────────────────────────────────
     # Find all Go/GB occurrences; pick the smallest that's a power-of-2 ≤ 64
@@ -255,6 +267,19 @@ def rule_parse(text: str) -> dict[str, Any]:
     res_m = re.search(r"(\d{3,4})[xX×](\d{3,4})", combined)
     if res_m:
         specs["screen_res"] = f"{res_m.group(1)}x{res_m.group(2)}"
+    else:
+        # Keyword fallback common in FR/EN product descriptions
+        _RES_KEYWORDS = {
+            r"\bFull\s+HD\b|\bFHD\b":        "1920x1080",
+            r"\b4K\b|\bUHD\b":               "3840x2160",
+            r"\b2K\b|\bQHD\b|\bWQHD\b":      "2560x1440",
+            r"\bHD\+\b":                      "1600x900",
+            r"(?<!\w)HD(?!\+)(?!\s*Ready)":   "1366x768",
+        }
+        for pattern, resolution in _RES_KEYWORDS.items():
+            if re.search(pattern, combined, re.IGNORECASE):
+                specs["screen_res"] = resolution
+                break
 
     # ── OS ────────────────────────────────────────────────────
     os_m = _OS_RE.search(combined)
@@ -385,6 +410,13 @@ async def normalize_items(
     ai_needed = []   # (index_in_results, item)
 
     for item in items:
+        # ── Fix: derive title from image_url when title is null ──────────
+        if not item.get("title") and item.get("image_url"):
+            slug = item["image_url"].rsplit("/", 1)[-1]          # last path segment
+            slug = re.sub(r"\.(jpg|jpeg|png|webp).*$", "", slug, flags=re.IGNORECASE)
+            slug = re.sub(r"-\d+$", "", slug)                    # strip trailing -1, -2
+            item = {**item, "title": slug.replace("-", " ").title()}
+
         text  = f"{item.get('title', '')} {item.get('description', '')}"
         specs = rule_parse(text)
 
